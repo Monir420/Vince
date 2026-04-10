@@ -24,9 +24,12 @@ jobs:
         libssl-dev libelf-dev python3 python3-pip
 
     # ⚡ Clang (AOSP optimized)
-    - name: Clone Clang Toolchain
-      run: |
-        git clone --depth=1 https://github.com/Neutron-Toolchains/clang.git clang
+   - name: Clone Clang Toolchain (FIXED)
+  run: |
+    git config --global --unset-all credential.helper || true
+    git config --global --add safe.directory '*'
+
+    git clone --depth=1 https://github.com/Neutron-Toolchains/clang.git clang
 
     # 🔥 KernelSU (Production root)
     - name: Add KernelSU
