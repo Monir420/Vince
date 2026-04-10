@@ -1,4 +1,4 @@
-name: Vince Kernel CI (Boot Safe + KernelSU)
+name: Vince Kernel CI (PURE BOOT SAFE)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ env:
   SUBARCH: arm64
   KBUILD_BUILD_USER: ReLIFE
   KBUILD_BUILD_HOST: github
-  CLANG_PATH: clang
 
 jobs:
   build:
@@ -33,38 +32,38 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/XSans0/WeebX-Clang clang
 
-    - name: 🔥 Add KernelSU (STABLE)
-      run: |
-        curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
-        git submodule update --init --recursive || true
-
     - name: 🧹 Clean Build
       run: |
         rm -rf out
 
     - name: ⚙️ Load DEFCONFIG (CRITICAL)
       run: |
-        cd kernel
         make O=out ARCH=arm64 vince_defconfig
 
     - name: 🛠️ Build Kernel
       run: |
-        cd kernel
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
 
         make -j$(nproc) O=out \
         ARCH=arm64 \
-        CC=$GITHUB_WORKSPACE/clang/bin/clang \
+        CC=clang \
         CLANG_TRIPLE=aarch64-linux-gnu- \
         CROSS_COMPILE=aarch64-linux-gnu- \
         CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
+    - name: 🚨 Verify Kernel Output
+      run: |
+        if [ ! -f out/arch/arm64/boot/Image.gz-dtb ]; then
+          echo "❌ Build failed: Image.gz-dtb missing"
+          exit 1
+        fi
+
     - name: 📦 Prepare AnyKernel3
       run: |
         git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+        cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
 
-        cp kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-
-    - name: 🧩 Fix AnyKernel (Device Name)
+    - name: 🧩 Fix Device Name
       run: |
         sed -i 's/device.name1=.*/device.name1=vince/' AnyKernel3/anykernel.sh
 
