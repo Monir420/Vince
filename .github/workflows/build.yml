@@ -1,12 +1,12 @@
 name: ReLIFE Kernel CI (vince)
 
 on:
-push:
-workflow_dispatch:
+  push:
+    workflow_dispatch:
 
 jobs:
-build:
-runs-on: ubuntu-22.04
+  build:
+    runs-on: ubuntu-22.04
 
 env:
   KERNEL_NAME: ReLIFE
