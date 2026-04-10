@@ -1,37 +1,54 @@
-name: Vince Kernel CI (Boot Safe)
+name: Vince Production Kernel CI
 
 on:
   workflow_dispatch:
+
+env:
+  ARCH: arm64
+  SUBARCH: arm64
+  KBUILD_BUILD_USER: aospci
+  KBUILD_BUILD_HOST: github
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y git wget curl zip unzip build-essential bc bison flex libssl-dev libelf-dev python3
+        sudo apt install -y git wget curl zip unzip build-essential bc bison flex \
+        libssl-dev libelf-dev python3 python3-pip
 
-    - name: Clone Clang (Stable)
+    # ⚡ Clang (AOSP optimized)
+    - name: Clone Clang Toolchain
       run: |
-        git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+        git clone --depth=1 https://github.com/Neutron-Toolchains/clang.git clang
 
-    - name: Setup ENV
+    # 🔥 KernelSU (Production root)
+    - name: Add KernelSU
       run: |
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "KBUILD_BUILD_USER=vinceci" >> $GITHUB_ENV
-        echo "KBUILD_BUILD_HOST=github" >> $GITHUB_ENV
-        echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
 
-    - name: Defconfig
+    - name: Export PATH
       run: |
-        make O=out ARCH=arm64 vince_defconfig
+        echo "$PWD/clang/bin" >> $GITHUB_PATH
 
+    - name: Verify defconfig
+      run: |
+        echo "Available defconfigs:"
+        ls arch/arm64/configs/
+
+    # ⚠️ CHANGE THIS if needed
+    - name: Load Defconfig
+      run: |
+        make O=out mrproper
+        make O=out ARCH=arm64 lineage_vince_defconfig
+
+    # 🔥 Production build flags
     - name: Build Kernel
       run: |
         make -j$(nproc --all) O=out \
@@ -39,19 +56,34 @@ jobs:
           CC=clang \
           LLVM=1 \
           LLVM_IAS=1 \
-          CLANG_TRIPLE=aarch64-linux-gnu-
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          KCFLAGS="-O3 -pipe -fno-plt"
 
-    - name: Package AnyKernel3
+    # 📦 AnyKernel3 packaging
+    - name: Package Kernel (AnyKernel3)
       run: |
-        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
 
-        cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+        KERNEL_IMG=$(find out/arch/arm64/boot -name "Image*" | head -n 1)
+        cp "$KERNEL_IMG" AnyKernel3/
+
+        sed -i 's/device.name=.*/device.name=vince/' AnyKernel3/anykernel.sh
 
         cd AnyKernel3
-        zip -r9 Vince-Kernel.zip *
+        zip -r9 Vince-Kernel-Production.zip *
 
-    - name: Upload ZIP
+    # 📤 Upload Artifact
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Vince-Kernel-Flashable
-        path: AnyKernel3/Vince-Kernel.zip
+        name: Vince-Kernel
+        path: AnyKernel3/Vince-Kernel-Production.zip
+
+    # 🚀 GitHub Release (AUTO)
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: AnyKernel3/Vince-Kernel-Production.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
