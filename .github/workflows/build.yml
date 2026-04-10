@@ -1,4 +1,4 @@
-name: Build Kernel (4.9 Non-GKI + KernelSU)
+name: Build vince Kernel (KernelSU Stable)
 
 on:
 workflow_dispatch:
@@ -8,7 +8,7 @@ build:
 runs-on: ubuntu-latest
 
 steps:
-- name: 📥 Checkout Kernel Source
+- name: 📥 Checkout Source
   uses: actions/checkout@v4
 
 - name: 🧰 Install Dependencies
@@ -16,46 +16,71 @@ steps:
     sudo apt update
     sudo apt install -y \
       git bc bison build-essential curl flex libssl-dev \
-      libncurses5-dev libelf-dev python3 unzip zip
+      libncurses5-dev libelf-dev python3 unzip zip ccache
 
-- name: 🔧 Clone Toolchain (WeebX Clang)
+- name: 🔧 Clone Clang
   run: |
-    git clone --depth=1 https://github.com/XSans0/WeebX-Clang.git clang
+    git clone --depth=1 https://github.com/XSans0/WeebX-Clang clang
 
-- name: 🧩 Clone KernelSU
+- name: 🧩 Setup KernelSU
   run: |
     git clone https://github.com/tiann/KernelSU.git
     cd KernelSU
     bash setup.sh
     cd ..
 
-- name: ⚙️ Export Environment
+- name: ⚙️ Export Env
   run: |
     echo "ARCH=arm64" >> $GITHUB_ENV
     echo "SUBARCH=arm64" >> $GITHUB_ENV
-    echo "KBUILD_BUILD_USER=runner" >> $GITHUB_ENV
-    echo "KBUILD_BUILD_HOST=github" >> $GITHUB_ENV
+    echo "KBUILD_BUILD_USER=ReLIFE" >> $GITHUB_ENV
+    echo "KBUILD_BUILD_HOST=GitHub" >> $GITHUB_ENV
     echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
 
-- name: 🛠️ Build Kernel
+- name: 🧹 Clean
+  run: make mrproper
+
+- name: ⚙️ Load Defconfig (vince)
   run: |
     make O=out ARCH=arm64 vince_defconfig
+
+- name: 🔧 Fix configs (IMPORTANT)
+  run: |
+    echo "CONFIG_KSU=y" >> out/.config
+    echo "CONFIG_KSU_SELINUX_BYPASS=y" >> out/.config
+    echo "CONFIG_TMPFS=y" >> out/.config
+    echo "CONFIG_DEVTMPFS=y" >> out/.config
+    make O=out ARCH=arm64 olddefconfig
+
+- name: 🛠️ Build
+  run: |
     make -j$(nproc) O=out \
       ARCH=arm64 \
-      CC=clang \
+      CC="ccache clang" \
       LLVM=1 \
-      LLVM_IAS=1
+      LLVM_IAS=1 \
+      CLANG_TRIPLE=aarch64-linux-gnu-
 
-- name: 📦 Create Flashable Zip (AnyKernel3)
+- name: 📦 AnyKernel3 Packaging (vince safe)
   run: |
     git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+
+    # Copy kernel image
     cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
 
     cd AnyKernel3
-    zip -r9 Kernel.zip *
 
-- name: ⬆️ Upload Artifact
+    # 🔥 Critical for vince
+    sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+    sed -i 's/do.modules=1/do.modules=0/g' anykernel.sh
+
+    # Set correct device
+    sed -i 's/device.name1=.*/device.name1=vince/g' anykernel.sh
+
+    zip -r9 Kernel-vince-KSU.zip *
+
+- name: ⬆️ Upload
   uses: actions/upload-artifact@v4
   with:
-    name: Kernel-Build
-    path: AnyKernel3/Kernel.zip
+    name: vince-Kernel
+    path: AnyKernel3/Kernel-vince-KSU.zip
