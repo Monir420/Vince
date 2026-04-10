@@ -22,11 +22,11 @@ steps:
   run: |
     git clone --depth=1 https://github.com/XSans0/WeebX-Clang clang
 
-- name: 🧩 Setup KernelSU
+- name: 🧩 Setup KernelSU (proper path)
   run: |
-    git clone https://github.com/tiann/KernelSU.git
-    cd KernelSU
-    bash setup.sh
+    git clone https://github.com/tiann/KernelSU.git kernelsu
+    cd kernelsu
+    bash setup.sh $(pwd)/..
     cd ..
 
 - name: ⚙️ Export Env
@@ -38,21 +38,25 @@ steps:
     echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
 
 - name: 🧹 Clean
-  run: make mrproper
+  run: |
+    make mrproper
+    mkdir -p out
 
 - name: ⚙️ Load Defconfig (vince)
   run: |
     make O=out ARCH=arm64 vince_defconfig
 
-- name: 🔧 Fix configs (IMPORTANT)
+- name: 🔧 Fix configs (force KernelSU)
   run: |
-    echo "CONFIG_KSU=y" >> out/.config
-    echo "CONFIG_KSU_SELINUX_BYPASS=y" >> out/.config
-    echo "CONFIG_TMPFS=y" >> out/.config
-    echo "CONFIG_DEVTMPFS=y" >> out/.config
+    scripts/config --file out/.config \
+      -e KSU \
+      -e KSU_SELINUX_BYPASS \
+      -e TMPFS \
+      -e DEVTMPFS
+
     make O=out ARCH=arm64 olddefconfig
 
-- name: 🛠️ Build
+- name: 🛠️ Build Kernel
   run: |
     make -j$(nproc) O=out \
       ARCH=arm64 \
@@ -61,25 +65,41 @@ steps:
       LLVM_IAS=1 \
       CLANG_TRIPLE=aarch64-linux-gnu-
 
+- name: ✅ Verify Build Output
+  run: |
+    if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+      echo "Kernel built successfully"
+    else
+      echo "Build failed: Image not found"
+      exit 1
+    fi
+
 - name: 📦 AnyKernel3 Packaging (vince safe)
   run: |
     git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
 
-    # Copy kernel image
-    cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+    # Copy kernel image safely
+    if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+      cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+    elif [ -f out/arch/arm64/boot/Image.gz ]; then
+      cp out/arch/arm64/boot/Image.gz AnyKernel3/
+    else
+      cp out/arch/arm64/boot/Image AnyKernel3/
+    fi
 
     cd AnyKernel3
 
-    # 🔥 Critical for vince
+    # 🔥 vince-safe config
     sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
     sed -i 's/do.modules=1/do.modules=0/g' anykernel.sh
-
-    # Set correct device
     sed -i 's/device.name1=.*/device.name1=vince/g' anykernel.sh
+
+    # Disable slot issues (important for older devices)
+    sed -i 's/slot_select=auto/slot_select=none/g' anykernel.sh
 
     zip -r9 Kernel-vince-KSU.zip *
 
-- name: ⬆️ Upload
+- name: ⬆️ Upload Artifact
   uses: actions/upload-artifact@v4
   with:
     name: vince-Kernel
