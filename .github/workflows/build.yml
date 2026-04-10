@@ -1,79 +1,61 @@
-name: Vince Kernel CI (PURE BOOT SAFE)
+name: Build Kernel (4.9 Non-GKI + KernelSU)
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
-
-env:
-  ARCH: arm64
-  SUBARCH: arm64
-  KBUILD_BUILD_USER: ReLIFE
-  KBUILD_BUILD_HOST: github
+workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
+build:
+runs-on: ubuntu-latest
 
-    steps:
+steps:
+- name: 📥 Checkout Kernel Source
+  uses: actions/checkout@v4
 
-    - name: 📥 Checkout Kernel Source
-      uses: actions/checkout@v4
+- name: 🧰 Install Dependencies
+  run: |
+    sudo apt update
+    sudo apt install -y \
+      git bc bison build-essential curl flex libssl-dev \
+      libncurses5-dev libelf-dev python3 unzip zip
 
-    - name: ⚙️ Install Dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-        bc bison flex curl zip git make \
-        libssl-dev libncurses5-dev \
-        gcc-aarch64-linux-gnu
+- name: 🔧 Clone Toolchain (WeebX Clang)
+  run: |
+    git clone --depth=1 https://github.com/XSans0/WeebX-Clang.git clang
 
-    - name: 🔧 Setup Clang (WeebX)
-      run: |
-        git clone --depth=1 https://github.com/XSans0/WeebX-Clang clang
+- name: 🧩 Clone KernelSU
+  run: |
+    git clone https://github.com/tiann/KernelSU.git
+    cd KernelSU
+    bash setup.sh
+    cd ..
 
-    - name: 🧹 Clean Build
-      run: |
-        rm -rf out
+- name: ⚙️ Export Environment
+  run: |
+    echo "ARCH=arm64" >> $GITHUB_ENV
+    echo "SUBARCH=arm64" >> $GITHUB_ENV
+    echo "KBUILD_BUILD_USER=runner" >> $GITHUB_ENV
+    echo "KBUILD_BUILD_HOST=github" >> $GITHUB_ENV
+    echo "PATH=$GITHUB_WORKSPACE/clang/bin:$PATH" >> $GITHUB_ENV
 
-    - name: ⚙️ Load DEFCONFIG (CRITICAL)
-      run: |
-        make O=out ARCH=arm64 vince_defconfig
+- name: 🛠️ Build Kernel
+  run: |
+    make O=out ARCH=arm64 vince_defconfig
+    make -j$(nproc) O=out \
+      ARCH=arm64 \
+      CC=clang \
+      LLVM=1 \
+      LLVM_IAS=1
 
-    - name: 🛠️ Build Kernel
-      run: |
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+- name: 📦 Create Flashable Zip (AnyKernel3)
+  run: |
+    git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+    cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
 
-        make -j$(nproc) O=out \
-        ARCH=arm64 \
-        CC=clang \
-        CLANG_TRIPLE=aarch64-linux-gnu- \
-        CROSS_COMPILE=aarch64-linux-gnu- \
-        CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+    cd AnyKernel3
+    zip -r9 Kernel.zip *
 
-    - name: 🚨 Verify Kernel Output
-      run: |
-        if [ ! -f out/arch/arm64/boot/Image.gz-dtb ]; then
-          echo "❌ Build failed: Image.gz-dtb missing"
-          exit 1
-        fi
-
-    - name: 📦 Prepare AnyKernel3
-      run: |
-        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-        cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-
-    - name: 🧩 Fix Device Name
-      run: |
-        sed -i 's/device.name1=.*/device.name1=vince/' AnyKernel3/anykernel.sh
-
-    - name: 📦 Create Flashable ZIP
-      run: |
-        cd AnyKernel3
-        zip -r9 ReLIFE-Kernel-vince.zip *
-
-    - name: 📤 Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ReLIFE-Kernel-vince
-        path: AnyKernel3/ReLIFE-Kernel-vince.zip
+- name: ⬆️ Upload Artifact
+  uses: actions/upload-artifact@v4
+  with:
+    name: Kernel-Build
+    path: AnyKernel3/Kernel.zip
