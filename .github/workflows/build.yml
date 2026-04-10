@@ -1,0 +1,57 @@
+name: Vince Kernel CI (Boot Safe)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git wget curl zip unzip build-essential bc bison flex libssl-dev libelf-dev python3
+
+    - name: Clone Clang (Stable)
+      run: |
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+
+    - name: Setup ENV
+      run: |
+        echo "ARCH=arm64" >> $GITHUB_ENV
+        echo "SUBARCH=arm64" >> $GITHUB_ENV
+        echo "KBUILD_BUILD_USER=vinceci" >> $GITHUB_ENV
+        echo "KBUILD_BUILD_HOST=github" >> $GITHUB_ENV
+        echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Defconfig
+      run: |
+        make O=out ARCH=arm64 vince_defconfig
+
+    - name: Build Kernel
+      run: |
+        make -j$(nproc --all) O=out \
+          ARCH=arm64 \
+          CC=clang \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CLANG_TRIPLE=aarch64-linux-gnu-
+
+    - name: Package AnyKernel3
+      run: |
+        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+
+        cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+
+        cd AnyKernel3
+        zip -r9 Vince-Kernel.zip *
+
+    - name: Upload ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: Vince-Kernel-Flashable
+        path: AnyKernel3/Vince-Kernel.zip
