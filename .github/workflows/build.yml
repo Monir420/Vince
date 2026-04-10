@@ -35,9 +35,7 @@ jobs:
 
     - name: 🔥 Add KernelSU (STABLE)
       run: |
-        cd $GITHUB_WORKSPACE
         curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
-        cd kernel
         git submodule update --init --recursive || true
 
     - name: 🧹 Clean Build
