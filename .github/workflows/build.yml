@@ -1,129 +1,82 @@
-name: Vince Ultra Production Kernel CI v2
+name: Vince Kernel CI (Boot Safe + KernelSU)
 
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*"
+    branches: [ main ]
 
 env:
   ARCH: arm64
   SUBARCH: arm64
-  KBUILD_BUILD_USER: aospci
+  KBUILD_BUILD_USER: ReLIFE
   KBUILD_BUILD_HOST: github
-  USE_CCACHE: 1
+  CLANG_PATH: clang
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Kernel Source
+
+    - name: 📥 Checkout Kernel Source
       uses: actions/checkout@v4
 
-    # ⚡ Cache (ccache for speed)
-    - name: Setup ccache
-      uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ${{ runner.os }}-ccache-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-ccache-
-
-    - name: Install Dependencies
+    - name: ⚙️ Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y git wget curl zip unzip build-essential bc bison flex \
-        libssl-dev libelf-dev python3 python3-pip ccache
+        sudo apt install -y \
+        bc bison flex curl zip git make \
+        libssl-dev libncurses5-dev \
+        gcc-aarch64-linux-gnu
 
-    # ⚡ TOOLCHAIN FALLBACK SYSTEM
-    - name: Clone Toolchain (Multi-Fallback)
+    - name: 🔧 Setup Clang (WeebX)
       run: |
-        git config --global --unset-all credential.helper || true
-        git config --global --add safe.directory '*'
+        git clone --depth=1 https://github.com/XSans0/WeebX-Clang clang
 
-        echo "Cloning Neutron clang..."
-        git clone --depth=1 https://github.com/Neutron-Toolchains/clang.git clang || {
-
-          echo "Neutron failed, trying AOSP clang..."
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang || {
-
-            echo "AOSP failed, trying Proton clang..."
-            git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang || exit 1
-          }
-        }
-
-    # 🔥 KernelSU (root system)
-    - name: Add KernelSU
+    - name: 🔥 Add KernelSU (STABLE)
       run: |
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+        cd $GITHUB_WORKSPACE
+        curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
+        cd kernel
+        git submodule update --init --recursive || true
 
-    - name: Setup PATH
+    - name: 🧹 Clean Build
       run: |
-        echo "$PWD/clang/bin" >> $GITHUB_PATH
+        rm -rf out
 
-    # 🧠 Auto-detect defconfig
-    - name: Detect Defconfig
+    - name: ⚙️ Load DEFCONFIG (CRITICAL)
       run: |
-        echo "Searching defconfigs..."
-        ls arch/arm64/configs/
+        cd kernel
+        make O=out ARCH=arm64 vince_defconfig
 
-        if [ -f arch/arm64/configs/vince_defconfig ]; then
-          echo "DEFCONFIG=vince_defconfig" >> $GITHUB_ENV
-        elif [ -f arch/arm64/configs/lineage_vince_defconfig ]; then
-          echo "DEFCONFIG=lineage_vince_defconfig" >> $GITHUB_ENV
-        else
-          echo "DEFCONFIG=msm8953_defconfig" >> $GITHUB_ENV
-        fi
-
-    # 🧹 Clean build
-    - name: Clean Source
+    - name: 🛠️ Build Kernel
       run: |
-        make O=out mrproper
+        cd kernel
 
-    - name: Load Defconfig
+        make -j$(nproc) O=out \
+        ARCH=arm64 \
+        CC=$GITHUB_WORKSPACE/clang/bin/clang \
+        CLANG_TRIPLE=aarch64-linux-gnu- \
+        CROSS_COMPILE=aarch64-linux-gnu- \
+        CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+    - name: 📦 Prepare AnyKernel3
       run: |
-        make O=out ARCH=arm64 $DEFCONFIG
+        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
 
-    # 🔥 Build Kernel (optimized)
-    - name: Build Kernel
+        cp kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+
+    - name: 🧩 Fix AnyKernel (Device Name)
       run: |
-        export PATH=$PWD/clang/bin:$PATH
-        export CC="ccache clang"
+        sed -i 's/device.name1=.*/device.name1=vince/' AnyKernel3/anykernel.sh
 
-        make -j$(nproc --all) O=out \
-          ARCH=arm64 \
-          CC=clang \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          KCFLAGS="-O3 -pipe -fno-plt"
-
-    # 📦 AnyKernel3 packaging
-    - name: Package Kernel
+    - name: 📦 Create Flashable ZIP
       run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-
-        KERNEL_IMG=$(find out/arch/arm64/boot -type f -name "Image*" | head -n 1)
-        cp "$KERNEL_IMG" AnyKernel3/
-
-        sed -i 's/device.name=.*/device.name=vince/' AnyKernel3/anykernel.sh
-
         cd AnyKernel3
-        zip -r9 Vince-Ultra-Kernel-v2.zip *
+        zip -r9 ReLIFE-Kernel-vince.zip *
 
-    # 📤 Upload Artifact
-    - name: Upload Artifact
+    - name: 📤 Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Vince-Ultra-Kernel-v2
-        path: AnyKernel3/Vince-Ultra-Kernel-v2.zip
-
-    # 🚀 GitHub Release (ONLY ON TAG)
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v2
-      with:
-        files: AnyKernel3/Vince-Ultra-Kernel-v2.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: ReLIFE-Kernel-vince
+        path: AnyKernel3/ReLIFE-Kernel-vince.zip
