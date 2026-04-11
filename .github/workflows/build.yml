@@ -2,117 +2,115 @@ name: ReLIFE Kernel CI (vince)
 
 on:
   push:
-    workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
-env:
-  KERNEL_NAME: ReLIFE
-  ARCH: arm64
-  SUBARCH: arm64
-  TZ: Asia/Dhaka
+    env:
+      KERNEL_NAME: ReLIFE
+      ARCH: arm64
 
-steps:
-  # 📥 Checkout
-  - name: Checkout source
-    uses: actions/checkout@v4
+    steps:
+      # 📥 Checkout
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-  # 📦 Dependencies
-  - name: Install dependencies
-    run: |
-      sudo apt update
-      sudo apt install -y \
-        git curl wget zip unzip bc bison flex \
-        build-essential libssl-dev libncurses5-dev \
-        python3
+      # 📦 Dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git curl wget zip unzip bc bison flex \
+            build-essential libssl-dev libncurses5-dev \
+            python3
 
-  # 🔍 Detect defconfig
-  - name: Detect defconfig
-    run: |
-      echo "Available configs:"
-      ls arch/arm64/configs || true
+      # 🔍 Detect defconfig
+      - name: Detect defconfig
+        run: |
+          echo "Available configs:"
+          ls arch/arm64/configs || true
 
-      if [ -f arch/arm64/configs/vince_defconfig ]; then
-          echo "KERNEL_DEFCONFIG=vince_defconfig" >> $GITHUB_ENV
-      elif [ -f arch/arm64/configs/msm8953_defconfig ]; then
-          echo "KERNEL_DEFCONFIG=msm8953_defconfig" >> $GITHUB_ENV
-      elif [ -f arch/arm64/configs/lineage_vince_defconfig ]; then
-          echo "KERNEL_DEFCONFIG=lineage_vince_defconfig" >> $GITHUB_ENV
-      else
-          echo "❌ No valid defconfig found"
-          exit 1
-      fi
+          if [ -f arch/arm64/configs/vince_defconfig ]; then
+              echo "KERNEL_DEFCONFIG=vince_defconfig" >> $GITHUB_ENV
+          elif [ -f arch/arm64/configs/msm8953_defconfig ]; then
+              echo "KERNEL_DEFCONFIG=msm8953_defconfig" >> $GITHUB_ENV
+          elif [ -f arch/arm64/configs/lineage_vince_defconfig ]; then
+              echo "KERNEL_DEFCONFIG=lineage_vince_defconfig" >> $GITHUB_ENV
+          else
+              echo "❌ No valid defconfig found"
+              exit 1
+          fi
 
-  # 🔐 KernelSU (hookless)
-  - name: Integrate KernelSU
-    run: |
-      git clone --depth=1 https://github.com/tiann/KernelSU.git -b v3.1.0 kernelsu
-      cp -r kernelsu/* ./
+      # 🔐 KernelSU (hookless)
+      - name: Integrate KernelSU
+        run: |
+          git clone --depth=1 https://github.com/tiann/KernelSU.git -b v3.1.0 kernelsu
+          cp -r kernelsu/* ./
 
-      echo "CONFIG_KSU=y" >> arch/arm64/configs/$KERNEL_DEFCONFIG
-      echo "CONFIG_KSU_HOOKLESS=y" >> arch/arm64/configs/$KERNEL_DEFCONFIG
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/$KERNEL_DEFCONFIG
+          echo "CONFIG_KSU_HOOKLESS=y" >> arch/arm64/configs/$KERNEL_DEFCONFIG
 
-  # ⚡ Proton Clang
-  - name: Clone Proton Clang
-    run: |
-      git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+      # ⚡ Proton Clang
+      - name: Clone Proton Clang
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
-  # 🛠 GCC (aarch64 + arm32)
-  - name: Clone GCC toolchains
-    run: |
-      git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 gcc64
-      git clone --depth=1 https://github.com/mvaisakh/gcc-arm gcc32
+      # 🛠 GCC (aarch64 + arm32)
+      - name: Clone GCC toolchains
+        run: |
+          git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 gcc64
+          git clone --depth=1 https://github.com/mvaisakh/gcc-arm gcc32
 
-  # 🌍 Environment
-  - name: Setup environment
-    run: |
-      echo "PATH=$PWD/clang/bin:$PWD/gcc64/bin:$PWD/gcc32/bin:$PATH" >> $GITHUB_ENV
-      echo "CC=clang" >> $GITHUB_ENV
+      # 🌍 Environment
+      - name: Setup environment
+        run: |
+          echo "PATH=$PWD/clang/bin:$PWD/gcc64/bin:$PWD/gcc32/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
 
-  # ⚙️ Defconfig
-  - name: Run defconfig
-    run: |
-      make O=out ARCH=arm64 $KERNEL_DEFCONFIG
+      # ⚙️ Defconfig
+      - name: Run defconfig
+        run: |
+          make O=out ARCH=arm64 $KERNEL_DEFCONFIG
 
-  # 🔨 Build
-  - name: Build kernel
-    run: |
-      make -j$(nproc --all) \
-        O=out \
-        ARCH=arm64 \
-        CC=clang \
-        CROSS_COMPILE=aarch64-linux-android- \
-        CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-        CLANG_TRIPLE=aarch64-linux-gnu- \
-        2>&1 | tee build.log
+      # 🔨 Build
+      - name: Build kernel
+        run: |
+          make -j$(nproc --all) \
+            O=out \
+            ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            2>&1 | tee build.log
 
-  # ✅ Verify
-  - name: Verify build
-    run: |
-      if [ ! -f out/arch/arm64/boot/Image.gz-dtb ]; then
-        echo "❌ Build failed: Image.gz-dtb not found"
-        exit 1
-      fi
+      # ✅ Verify
+      - name: Verify build
+        run: |
+          if [ ! -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            echo "❌ Build failed: Image.gz-dtb not found"
+            exit 1
+          fi
 
-  # 📦 AnyKernel3
-  - name: Package AnyKernel3
-    run: |
-      git clone --depth=1 https://github.com/osm0sis/AnyKernel3 anykernel
-      cp out/arch/arm64/boot/Image.gz-dtb anykernel/
+      # 📦 AnyKernel3
+      - name: Package AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 anykernel
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/
 
-  # 🗜 ZIP
-  - name: Create ZIP
-    run: |
-      cd anykernel
-      zip -r9 ReLIFE-Kernel-vince.zip ./*
+      # 🗜 ZIP
+      - name: Create ZIP
+        run: |
+          cd anykernel
+          zip -r9 ReLIFE-Kernel-vince.zip ./*
 
-  # 📤 Upload
-  - name: Upload artifacts
-    uses: actions/upload-artifact@v4
-    with:
-      name: ReLIFE-Kernel-vince
-      path: |
-        anykernel/*.zip
-        build.log
+      # 📤 Upload
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReLIFE-Kernel-vince
+          path: |
+            anykernel/*.zip
+            build.log
