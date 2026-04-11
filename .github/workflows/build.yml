@@ -26,22 +26,33 @@ jobs:
             build-essential libssl-dev libncurses5-dev \
             python3
 
-      # 🔍 Detect defconfig
+      # 🔍 Detect + import defconfig (external repo)
       - name: Detect defconfig
         run: |
-          echo "Available configs:"
-          ls arch/arm64/configs || true
+          git clone --depth=1 https://github.com/k4ngcaribug/kernel_xiaomi_vince.git defconfig_repo
 
-          if [ -f arch/arm64/configs/vince_defconfig ]; then
-              echo "KERNEL_DEFCONFIG=vince_defconfig" >> $GITHUB_ENV
-          elif [ -f arch/arm64/configs/msm8953_defconfig ]; then
-              echo "KERNEL_DEFCONFIG=msm8953_defconfig" >> $GITHUB_ENV
-          elif [ -f arch/arm64/configs/lineage_vince_defconfig ]; then
-              echo "KERNEL_DEFCONFIG=lineage_vince_defconfig" >> $GITHUB_ENV
-          else
-              echo "❌ No valid defconfig found"
+          echo "Searching defconfig files..."
+          DEFCONFIG_PATH=$(find defconfig_repo -type f -name "*defconfig" | grep -i vince | head -n 1)
+
+          # fallback if no vince-specific match
+          if [ -z "$DEFCONFIG_PATH" ]; then
+              DEFCONFIG_PATH=$(find defconfig_repo -type f -name "*defconfig" | head -n 1)
+          fi
+
+          if [ -z "$DEFCONFIG_PATH" ]; then
+              echo "❌ No defconfig found"
               exit 1
           fi
+
+          echo "Found defconfig: $DEFCONFIG_PATH"
+
+          DEFCONFIG_NAME=$(basename "$DEFCONFIG_PATH")
+
+          # copy into kernel tree (IMPORTANT)
+          cp "$DEFCONFIG_PATH" arch/arm64/configs/
+
+          echo "KERNEL_DEFCONFIG=$DEFCONFIG_NAME" >> $GITHUB_ENV
+          echo "Using defconfig: $DEFCONFIG_NAME"
 
       # 🔐 KernelSU (hookless)
       - name: Integrate KernelSU
@@ -57,7 +68,7 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
-      # 🛠 GCC (aarch64 + arm32)
+      # 🛠 GCC toolchains
       - name: Clone GCC toolchains
         run: |
           git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 gcc64
@@ -106,7 +117,7 @@ jobs:
           cd anykernel
           zip -r9 ReLIFE-Kernel-vince.zip ./*
 
-      # 📤 Upload
+      # 📤 Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
